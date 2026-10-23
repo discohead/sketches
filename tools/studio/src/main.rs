@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use studio::workspace::Workspace;
-use studio::{capture, doctor, media, new, pieces};
+use studio::{capture, doctor, hang, media, new, pieces};
 
 #[derive(Parser)]
 #[command(name = "studio", about = "Create, list and run art pieces")]
@@ -34,6 +34,13 @@ enum Cmd {
         /// How many evenly spaced frames to render when --at is not given
         #[arg(long, default_value_t = 6)]
         count: usize,
+    },
+    /// Record, number, commit, push and deposit a finished piece
+    Hang {
+        piece: String,
+        /// Commit but do not push. The deposit then names a commit that is not public yet.
+        #[arg(long)]
+        no_push: bool,
     },
 }
 
@@ -96,6 +103,11 @@ fn real_main() -> Result<i32> {
             for f in &paths {
                 println!("{}", f.display());
             }
+            Ok(0)
+        }
+        Cmd::Hang { piece, no_push } => {
+            let dir = hang::run(&ws, &piece, hang::HangOpts { push: !no_push })?;
+            println!("{}", dir.display());
             Ok(0)
         }
     }
