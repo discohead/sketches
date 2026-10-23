@@ -54,6 +54,7 @@ macro_rules! window {
 ///
 /// When `KIT_CAPTURE_DIR` and `KIT_CAPTURE_FRAMES` are set, time is frame-locked to
 /// `1/fps` and the requested frames are saved as `<dir>/<frame:05>.png`, then the app exits.
+/// The process exits 0 only if every requested frame was written; otherwise it exits 1.
 pub fn launch<M: 'static + Send + Sync>(meta: PieceMeta, builder: nannou::app::Builder<M>) {
     assert!(META.set(meta).is_ok(), "kit::launch was called twice");
 
@@ -65,15 +66,23 @@ pub fn launch<M: 'static + Send + Sync>(meta: PieceMeta, builder: nannou::app::B
                 builder.add_plugin(capture::CapturePlugin::new(config, self::meta().time.fps))
             }
             Ok(None) => builder,
-            Err(e) => panic!("kit capture: {e:#}"),
+            Err(e) => {
+                eprintln!("kit capture: {e:#}");
+                std::process::exit(1);
+            }
         }
     };
 
     builder.run();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if capture::failed() {
+        std::process::exit(1);
+    }
 }
 
-/// Forces scale factor 1.0 on the primary window as it is spawned, before winit creates it,
-/// so physical pixels equal the canvas in live preview and capture alike.
+/// Keeps the primary window at exactly the canvas size in physical pixels, in live preview and
+/// capture alike.
 #[cfg(not(target_arch = "wasm32"))]
 struct ExactPixelsPlugin;
 
@@ -83,10 +92,32 @@ impl bevy::app::Plugin for ExactPixelsPlugin {
         use bevy::ecs::prelude::*;
         use bevy::window::{PrimaryWindow, Window};
 
+        // Set the override as the window is spawned, before winit creates the OS window.
         app.add_observer(
             |add: On<Add, PrimaryWindow>, mut windows: Query<&mut Window>| {
                 if let Ok(mut window) = windows.get_mut(add.entity) {
                     window.resolution.set_scale_factor_override(Some(1.0));
+                }
+            },
+        );
+
+        // bevy_winit applies the monitor's scale factor to the physical size when it creates
+        // the window (1080×720 for a 540×360 canvas on Retina) until winit's resize arrives.
+        // Put it back before anything renders at the wrong size.
+        app.add_systems(
+            bevy::app::First,
+            |mut windows: Query<&mut Window, With<PrimaryWindow>>| {
+                let canvas = &meta().canvas;
+                for mut window in &mut windows {
+                    let r = &window.resolution;
+                    if r.scale_factor_override() == Some(1.0)
+                        && (r.physical_width(), r.physical_height())
+                            != (canvas.width, canvas.height)
+                    {
+                        window
+                            .resolution
+                            .set_physical_resolution(canvas.width, canvas.height);
+                    }
                 }
             },
         );

@@ -9,6 +9,9 @@ nannou = { workspace = true }
 bevy = { workspace = true }
 anyhow = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = { workspace = true }
+
 [dev-dependencies]
 image = { workspace = true }
 tempfile = { workspace = true }
