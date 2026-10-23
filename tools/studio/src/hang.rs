@@ -217,6 +217,15 @@ pub fn set_package_name(text: &str, name: &str) -> Result<String> {
     Ok(out)
 }
 
+/// `piece.toml` text with top-level `catalog` set, everything else (comments,
+/// layout, float literals such as `still_at = 2.51`) left as written.
+/// Re-serializing would print `2.51` as `2.509999990463257` in a frozen file.
+pub fn set_catalog(text: &str, catalog: &str) -> Result<String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().context("piece.toml is not valid TOML")?;
+    doc["catalog"] = toml_edit::value(catalog);
+    Ok(doc.to_string())
+}
+
 /// The parent's catalog id when the parent is hung, otherwise `None`.
 pub fn parent_catalog(ws: &Workspace, meta: &PieceMeta) -> Result<Option<String>> {
     let Some(parent) = &meta.parent else {
@@ -299,8 +308,12 @@ pub fn move_to_hung(ws: &Workspace, piece: &Piece, catalog: &str, n: u32) -> Res
         Some(c) if c == catalog => {}
         Some(c) => bail!("{} already has catalog {c}, not {catalog}", piece.folder),
         None => {
+            let path = piece.dir.join("piece.toml");
+            let text = fs::read_to_string(&path)
+                .with_context(|| format!("cannot read {}", path.display()))?;
+            let edited = set_catalog(&text, catalog).with_context(|| format!("in {}", path.display()))?;
+            fs::write(&path, edited).with_context(|| format!("cannot write {}", path.display()))?;
             meta.catalog = Some(catalog.to_string());
-            fs::write(piece.dir.join("piece.toml"), meta.to_toml_string())?;
         }
     }
 
@@ -474,6 +487,31 @@ mod tests {
         let t: toml::Table = out.parse().unwrap();
         assert_eq!(t["package"]["name"].as_str(), Some("dss0001-tide"));
         assert!(set_package_name("[dependencies]\nx = 1\n", "a").is_err());
+    }
+
+    const HAND_EDITED: &str = "# Second take on the tide idea.\ntitle = \"Tide Pool\"\nslug = \"tide\"\ncreated = \"2026-10-22\"\nstatement = \"Water.\"\ntags = [\"2d\", \"moire\"] # medium first\nlive = false\naudio = false\n\n[canvas]\nwidth = 1080\nheight = 1080\n\n[time]\nfps = 60\nform = \"loop\"\nseconds = 7.3\nstill_at = 2.51 # the brightest frame\n";
+
+    #[test]
+    fn move_to_hung_adds_only_catalog_to_piece_toml() {
+        let (_d, ws) = repo();
+        let dir = add_piece(&ws.root, "2026-10-22-tide", &ready_meta("tide"), "wip-tide");
+        fs::write(dir.join("piece.toml"), HAND_EDITED).unwrap();
+        let piece = crate::pieces::resolve(&ws, "tide").unwrap();
+        let hung = move_to_hung(&ws, &piece, "DSS0001", 1).unwrap();
+        let text = fs::read_to_string(hung.dir.join("piece.toml")).unwrap();
+        let want = HAND_EDITED.replace("audio = false\n", "audio = false\ncatalog = \"DSS0001\"\n");
+        assert_eq!(text, want);
+        assert_eq!(PieceMeta::from_toml_str(&text).unwrap().catalog.as_deref(), Some("DSS0001"));
+    }
+
+    #[test]
+    fn set_catalog_keeps_formatting() {
+        let out = set_catalog(HAND_EDITED, "DSS0042").unwrap();
+        assert!(out.contains("still_at = 2.51 # the brightest frame\n"), "{out}");
+        assert!(out.contains("seconds = 7.3\n"), "{out}");
+        assert!(out.starts_with("# Second take on the tide idea.\n"), "{out}");
+        assert_eq!(out.lines().count(), HAND_EDITED.lines().count() + 1);
+        assert!(set_catalog("not = [toml", "DSS0001").is_err());
     }
 
     #[test]
