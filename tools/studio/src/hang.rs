@@ -22,8 +22,11 @@ pub struct HangOpts {
 /// attempt; every later step is skipped when already done, so a re-run after a
 /// failure resumes with the same catalog number. An existing deposit is never
 /// overwritten.
+///
+/// Without `push`, it stops after the commit and returns the unfinished
+/// `.partial` dir; re-running with `push` finishes the deposit.
 pub fn run(ws: &Workspace, name: &str, opts: HangOpts) -> Result<PathBuf> {
-    // 1. Resolve and check the piece is ready.
+    // 1. Resolve and check the piece, the shared code, the remote and the branch.
     let piece = pieces::resolve(ws, name)?;
     let errors = piece.meta.readiness_errors();
     if !errors.is_empty() {
@@ -33,9 +36,14 @@ pub fn run(ws: &Workspace, name: &str, opts: HangOpts) -> Result<PathBuf> {
     if total == 0 {
         bail!("{} has no frames: time.seconds is {}", piece.folder, piece.meta.time.seconds);
     }
+    check_shared_clean(ws)?;
     let origin = git(ws, &["remote", "get-url", "origin"])
         .context("this repo has no `origin` remote, which the deposit's source link needs")?;
-    let repo = deposit::normalize_repo_url(&origin);
+    let allow_any = std::env::var("STUDIO_ALLOW_ANY_ORIGIN").is_ok_and(|v| v == "1");
+    let repo = deposit::source_repo(&origin, allow_any)?;
+    if opts.push {
+        check_branch(ws)?;
+    }
 
     // 2. Number: the piece's own number if it has one, otherwise the next free one.
     let prefix = &ws.config.catalog.prefix;
@@ -90,20 +98,26 @@ pub fn run(ws: &Workspace, name: &str, opts: HangOpts) -> Result<PathBuf> {
         eprintln!("{catalog}: committed");
     }
 
-    // 7. Push.
-    if opts.push {
-        eprintln!("{catalog}: pushing");
-        let out = ws
-            .tool("git")
-            .args(["push", "origin", "HEAD"])
-            .output()
-            .context("could not run git")?;
-        if !out.status.success() {
-            bail!(
-                "push failed; fix and re-run `studio hang {catalog}`\n{}",
-                String::from_utf8_lossy(&out.stderr).trim_end()
-            );
-        }
+    // 7. Push. Without a push the commit is not public yet, so the deposit waits.
+    if !opts.push {
+        eprintln!(
+            "{catalog}: committed but not pushed. The deposit is left unfinished in {}.\n\
+             Re-run `studio hang {catalog}` without --no-push to push and finish it.",
+            partial.display()
+        );
+        return Ok(partial);
+    }
+    eprintln!("{catalog}: pushing");
+    let out = ws
+        .tool("git")
+        .args(["--literal-pathspecs", "push", "origin", "HEAD"])
+        .output()
+        .context("could not run git")?;
+    if !out.status.success() {
+        bail!(
+            "push failed; fix and re-run `studio hang {catalog}`\n{}",
+            String::from_utf8_lossy(&out.stderr).trim_end()
+        );
     }
 
     // 8. Write piece.json, then make the deposit appear in one rename.
@@ -226,9 +240,44 @@ pub fn parent_catalog(ws: &Workspace, meta: &PieceMeta) -> Result<Option<String>
     Ok(None)
 }
 
+/// Refuse unless the current branch is `main`.
+pub fn check_branch(ws: &Workspace) -> Result<()> {
+    let branch = git(ws, &["branch", "--show-current"])?;
+    if branch != "main" {
+        let shown = if branch.is_empty() { "a detached HEAD" } else { branch.as_str() };
+        bail!("hang pushes main only; you're on {shown}");
+    }
+    Ok(())
+}
+
+/// Shared code the render depends on. The hang commit holds only the piece, so
+/// uncommitted changes here would not be in the commit the deposit names.
+const SHARED: [&str; 6] = ["lib", "tools", "templates", "Cargo.toml", "rust-toolchain.toml", ".cargo"];
+
+/// Refuse if any shared code has uncommitted changes, naming the files.
+fn check_shared_clean(ws: &Workspace) -> Result<()> {
+    let mut args = vec!["status", "--porcelain", "--untracked-files=all", "--"];
+    args.extend(SHARED);
+    let status = git(ws, &args)?;
+    if !status.is_empty() {
+        let files: Vec<&str> = status.lines().map(|l| l.get(3..).unwrap_or(l)).collect();
+        bail!(
+            "these files outside the piece have uncommitted changes:\n  {}\n\
+             The deposit names the commit that made the piece, so commit or stash these first.",
+            files.join("\n  ")
+        );
+    }
+    Ok(())
+}
+
 /// Run git in the repo root and return its trimmed stdout.
 fn git(ws: &Workspace, args: &[&str]) -> Result<String> {
-    let out = ws.tool("git").args(args).output().context("could not run git")?;
+    let out = ws
+        .tool("git")
+        .arg("--literal-pathspecs")
+        .args(args)
+        .output()
+        .context("could not run git")?;
     if !out.status.success() {
         bail!("git {} failed:\n{}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim_end());
     }
@@ -239,6 +288,12 @@ fn git(ws: &Workspace, args: &[&str]) -> Result<String> {
 /// rename the package. Each part is skipped if already done.
 pub fn move_to_hung(ws: &Workspace, piece: &Piece, catalog: &str, n: u32) -> Result<Piece> {
     let target = hung_folder(n, &piece.meta.slug);
+    let number_prefix = format!("{}-", catalog_id(&ws.config.catalog.prefix, n).to_ascii_lowercase());
+    for other in pieces::all(ws)? {
+        if other.folder != piece.folder && other.folder.starts_with(&number_prefix) {
+            bail!("{catalog} is already used by pieces/{}", other.folder);
+        }
+    }
     let mut meta = piece.meta.clone();
     match meta.catalog.as_deref() {
         Some(c) if c == catalog => {}
@@ -508,6 +563,57 @@ mod tests {
         assert!(status.contains("A  staged.txt"), "{status}");
         assert!(status.lines().any(|l| l.trim() == "M notes.txt"), "{status}");
         assert!(!status.contains("pieces"), "{status}");
+    }
+
+    #[test]
+    fn refuses_dirty_shared_code() {
+        let (_d, ws) = repo();
+        let root = &ws.root;
+        add_piece(root, "2026-10-22-tide", &ready_meta("tide"), "wip-tide");
+        fs::create_dir_all(root.join("lib/kit")).unwrap();
+        fs::write(root.join("lib/kit/a.rs"), "// new\n").unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        let e = format!("{:#}", run(&ws, "tide", HangOpts { push: false }).unwrap_err());
+        assert!(e.contains("lib/kit/a.rs") && e.contains("Cargo.toml"), "{e}");
+        assert!(e.contains("commit or stash"), "{e}");
+        assert!(!root.join(".studio").exists());
+
+        // Shared code clean, another piece dirty: gets past the check (and stops
+        // at the missing origin instead).
+        sh(root, &["add", "lib", "Cargo.toml"]);
+        sh(root, &["commit", "-q", "-m", "shared"]);
+        add_piece(root, "2026-10-21-other", &ready_meta("other"), "wip-other");
+        let e = format!("{:#}", run(&ws, "tide", HangOpts { push: false }).unwrap_err());
+        assert!(!e.contains("commit or stash"), "{e}");
+        assert!(e.contains("origin"), "{e}");
+    }
+
+    #[test]
+    fn pushes_main_only() {
+        let (_d, ws) = repo();
+        check_branch(&ws).unwrap();
+        sh(&ws.root, &["checkout", "-q", "-b", "phase-9"]);
+        let e = check_branch(&ws).unwrap_err().to_string();
+        assert_eq!(e, "hang pushes main only; you're on phase-9");
+    }
+
+    #[test]
+    fn number_taken_elsewhere() {
+        let (_d, ws) = repo();
+        // A catalog written into piece.toml counts even if the folder is not renamed.
+        let mut odd = ready_meta("odd");
+        odd.catalog = Some("DSS0007".into());
+        add_piece(&ws.root, "2026-10-20-odd", &odd, "wip-odd");
+        assert_eq!(crate::catalog::next_number(&ws).unwrap(), 8);
+
+        add_piece(&ws.root, "dss0002-ebb", &ready_meta("ebb"), "dss0002-ebb");
+        add_piece(&ws.root, "2026-10-22-tide", &ready_meta("tide"), "wip-tide");
+        let piece = crate::pieces::resolve(&ws, "tide").unwrap();
+        let e = move_to_hung(&ws, &piece, "DSS0002", 2).unwrap_err().to_string();
+        assert!(e.contains("dss0002-ebb"), "{e}");
+        assert!(ws.pieces_dir().join("2026-10-22-tide").is_dir());
+        let untouched = crate::pieces::resolve(&ws, "tide").unwrap();
+        assert_eq!(untouched.meta.catalog, None, "wrote the catalog before refusing");
     }
 
     #[test]

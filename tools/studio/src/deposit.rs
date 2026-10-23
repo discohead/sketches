@@ -1,5 +1,6 @@
 //! The deposit contract: `piece.json` and the media list. See `docs/deposit-spec.md`.
 
+use anyhow::{Result, bail};
 use piece_meta::{Form, PieceMeta};
 
 use crate::media::loop_repeats;
@@ -78,7 +79,7 @@ pub struct Media {
     pub width: u32,
     pub height: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub seconds: Option<f32>,
+    pub seconds: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +95,10 @@ pub fn cut_repeats(meta: &PieceMeta) -> u32 {
     }
 }
 
+fn round3(x: f64) -> f64 {
+    (x * 1000.0).round() / 1000.0
+}
+
 /// The media list for a piece, in deposit order.
 pub fn media_list(meta: &PieceMeta) -> Vec<Media> {
     let (w, h) = (meta.canvas.width, meta.canvas.height);
@@ -107,8 +112,12 @@ pub fn media_list(meta: &PieceMeta) -> Vec<Media> {
         fps: Some(meta.time.fps),
         audio: Some(meta.audio),
     };
-    let seconds = meta.time.seconds;
-    let cut_seconds = seconds * cut_repeats(meta) as f32;
+    // The rendered length, which can differ slightly from `time.seconds` when
+    // `seconds * fps` is not a whole number of frames.
+    let frames = f64::from(meta.total_frames());
+    let fps = f64::from(meta.time.fps);
+    let seconds = round3(frames / fps);
+    let cut_seconds = round3(f64::from(cut_repeats(meta)) * frames / fps);
     let mut media = vec![
         Media {
             file: STILL.into(),
@@ -166,6 +175,24 @@ impl Deposit {
         s.push('\n');
         s
     }
+}
+
+/// The deposit's `source.repo` for an `origin` URL: it must normalize to
+/// `https://github.com/<owner>/<repo>` unless `allow_any` is set (tests only).
+pub fn source_repo(origin: &str, allow_any: bool) -> Result<String> {
+    let url = normalize_repo_url(origin);
+    let is_github = url.strip_prefix("https://github.com/").is_some_and(|path| {
+        let parts: Vec<&str> = path.split('/').collect();
+        parts.len() == 2 && parts.iter().all(|p| !p.is_empty())
+    });
+    if !is_github && !allow_any {
+        bail!(
+            "origin is {origin}, which is not a GitHub repo. The deposit links to the code on \
+             GitHub, so origin must be https://github.com/<owner>/<repo> or \
+             git@github.com:<owner>/<repo>.git"
+        );
+    }
+    Ok(url)
 }
 
 /// GitHub remote URLs in any common form become `https://github.com/<owner>/<repo>`.
@@ -300,5 +327,41 @@ mod tests {
             assert_eq!(normalize_repo_url(url), want, "{url}");
         }
         assert_eq!(normalize_repo_url("/tmp/bare.git"), "/tmp/bare.git");
+    }
+
+    #[test]
+    fn source_repo_must_be_github() {
+        assert_eq!(
+            source_repo("git@github.com:discohead/sketches.git", false).unwrap(),
+            "https://github.com/discohead/sketches"
+        );
+        for bad in [
+            "/tmp/bare.git",
+            "https://gitlab.com/a/b.git",
+            "https://github.com/discohead",
+            "https://github.com/a/b/c",
+        ] {
+            let e = source_repo(bad, false).unwrap_err().to_string();
+            assert!(e.contains("not a GitHub repo"), "{bad}: {e}");
+        }
+        assert_eq!(source_repo("/tmp/bare.git", true).unwrap(), "/tmp/bare.git");
+    }
+
+    #[test]
+    fn media_seconds_are_rendered_length() {
+        let mut m = meta();
+        m.time.seconds = 7.3; // 438 frames at 60 fps
+        let media = media_list(&m);
+        assert_eq!(media[1].seconds, Some(7.3));
+        assert_eq!(cut_repeats(&m), 3);
+        assert_eq!(media[3].seconds, Some(21.9));
+        let d = Deposit::new(&m, "DSS0001", "2026-10-23", None, "r", "c", "p");
+        let json = d.to_json();
+        assert!(json.contains("\"seconds\": 21.9,"), "{json}");
+        assert!(!json.contains("21.900"), "{json}");
+        // 8.33 s at 30 fps renders 250 frames: 8.333 s.
+        m.time.seconds = 8.33;
+        m.time.fps = 30;
+        assert_eq!(media_list(&m)[1].seconds, Some(8.333));
     }
 }

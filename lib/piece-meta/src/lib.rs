@@ -75,6 +75,12 @@ impl PieceMeta {
         if self.live {
             errs.push("live = true: live web builds are Phase 2".to_string());
         }
+        let (w, h) = (self.canvas.width, self.canvas.height);
+        if w == 0 || h == 0 || w % 2 != 0 || h % 2 != 0 {
+            errs.push(format!(
+                "canvas is {w}x{h}: width and height must be even and above zero for video"
+            ));
+        }
         if self.time.still_at > self.time.seconds {
             errs.push(format!(
                 "still_at ({:?}) is past the end ({:?} s)",
@@ -189,6 +195,14 @@ still_at = 0.0
         let mut m = ready();
         m.time.still_at = 9.0;
         assert!(has(&m, "still_at"));
+        for (w, h) in [(1081, 1080), (1080, 1079), (0, 1080)] {
+            let mut m = ready();
+            m.canvas = Canvas { width: w, height: h };
+            assert!(has(&m, "must be even"), "{w}x{h}");
+        }
+        let mut m = ready();
+        m.canvas = Canvas { width: 1920, height: 1080 };
+        assert_eq!(m.readiness_errors(), Vec::<String>::new());
     }
 
     #[test]

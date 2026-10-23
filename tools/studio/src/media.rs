@@ -88,10 +88,27 @@ fn strs(args: &[&str]) -> impl Iterator<Item = String> {
     args.iter().map(|a| a.to_string())
 }
 
-/// ffmpeg arguments for the archival master: H.264, `-preset slow -crf 10`, 4:4:4.
+/// The filter stage that converts the RGB frames to limited-range BT.709 YUV in
+/// `pix_fmt` and tags the frames as BT.709. Without it ffmpeg converts with the
+/// BT.601 matrix and leaves the colour untagged.
+pub fn color_stage(pix_fmt: &str) -> String {
+    format!(
+        "scale=out_color_matrix=bt709:out_range=tv,format={pix_fmt},\
+         setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
+    )
+}
+
+/// Container-level BT.709 tags, matching `color_stage`.
+const COLOR_TAGS: [&str; 8] = [
+    "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
+];
+
+/// ffmpeg arguments for the archival master: H.264, `-preset slow -crf 10`, 4:4:4, BT.709.
 pub fn master_args(frames_dir: &Path, fps: u32, out: &Path) -> Vec<String> {
     let mut args = input_args(frames_dir, fps, 1);
+    args.extend(["-vf".into(), color_stage("yuv444p")]);
     args.extend(strs(&["-c:v", "libx264", "-preset", "slow", "-crf", "10", "-pix_fmt", "yuv444p"]));
+    args.extend(strs(&COLOR_TAGS));
     args.push(out.display().to_string());
     args
 }
@@ -100,10 +117,12 @@ const WEB_CODEC: [&str; 8] =
     ["-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
 
 /// ffmpeg arguments for the web copy at native canvas size: H.264, `-crf 18`,
-/// 4:2:0, fast start.
+/// 4:2:0, fast start, BT.709.
 pub fn web_args(frames_dir: &Path, fps: u32, out: &Path) -> Vec<String> {
     let mut args = input_args(frames_dir, fps, 1);
+    args.extend(["-vf".into(), color_stage("yuv420p")]);
     args.extend(strs(&WEB_CODEC));
+    args.extend(strs(&COLOR_TAGS));
     args.push(out.display().to_string());
     args
 }
@@ -112,8 +131,9 @@ pub fn web_args(frames_dir: &Path, fps: u32, out: &Path) -> Vec<String> {
 /// on black to `w`×`h`, with the web codec settings.
 pub fn cut_args(frames_dir: &Path, fps: u32, repeats: u32, w: u32, h: u32, out: &Path) -> Vec<String> {
     let mut args = input_args(frames_dir, fps, repeats);
-    args.extend(["-vf".into(), cut_filter(w, h)]);
+    args.extend(["-vf".into(), format!("{},{}", cut_filter(w, h), color_stage("yuv420p"))]);
     args.extend(strs(&WEB_CODEC));
+    args.extend(strs(&COLOR_TAGS));
     args.push(out.display().to_string());
     args
 }
@@ -199,14 +219,21 @@ mod tests {
         let web = web_args(dir, 30, Path::new("loop.mp4")).join(" ");
         assert!(web.contains("-framerate 30"), "{web}");
         assert!(web.contains("-c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart"), "{web}");
-        assert!(!web.contains("scale="), "{web}");
+        assert!(!web.contains("force_original_aspect_ratio"), "{web}");
+        for args in [&master, &web] {
+            assert!(args.contains("-colorspace bt709 -color_primaries bt709 -color_trc bt709"), "{args}");
+        }
+        assert!(master.contains(&format!("-vf {}", color_stage("yuv444p"))), "{master}");
+        assert!(web.contains(&format!("-vf {}", color_stage("yuv420p"))), "{web}");
+        assert!(color_stage("yuv420p").starts_with("scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,setparams="));
 
         let cut = cut_args(dir, 60, 2, 1080, 1920, Path::new("reel.mp4"));
         let joined = cut.join(" ");
         assert!(joined.contains("-stream_loop 1 -framerate 60"), "{joined}");
         assert!(joined.contains("-c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart"), "{joined}");
         let vf = cut.iter().position(|a| a == "-vf").unwrap();
-        assert_eq!(cut[vf + 1], cut_filter(1080, 1920));
+        assert_eq!(cut[vf + 1], format!("{},{}", cut_filter(1080, 1920), color_stage("yuv420p")));
+        assert!(joined.contains("-colorspace bt709 -color_primaries bt709 -color_trc bt709"), "{joined}");
         let once = cut_args(dir, 60, 1, 1080, 1920, Path::new("reel.mp4")).join(" ");
         assert!(once.contains("-stream_loop 0 "), "{once}");
     }

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -64,6 +64,18 @@ fn last_lines(text: &str, n: usize) -> String {
     lines[lines.len().saturating_sub(n)..].join("\n")
 }
 
+/// The command that runs a built piece in capture mode. Bevy looks for assets
+/// under `BEVY_ASSET_ROOT` before `CARGO_MANIFEST_DIR`, which studio inherits
+/// from `cargo run`, so it is set to the piece's own folder.
+fn capture_command(bin: &Path, piece: &Piece, out: &Path, spec: &str) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.current_dir(&piece.dir)
+        .env("BEVY_ASSET_ROOT", &piece.dir)
+        .env("KIT_CAPTURE_DIR", out)
+        .env("KIT_CAPTURE_FRAMES", spec);
+    cmd
+}
+
 /// Build the piece, run it in capture mode, and return the PNG for each frame.
 pub fn render(ws: &Workspace, piece: &Piece, frames: &[u64], out: &Path) -> Result<Vec<PathBuf>> {
     let Some(&max_frame) = frames.iter().max() else {
@@ -90,10 +102,7 @@ pub fn render(ws: &Workspace, piece: &Piece, frames: &[u64], out: &Path) -> Resu
     }
     let spec = frames.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
     let stderr_file = out.join("stderr.log");
-    let mut child = std::process::Command::new(&bin)
-        .current_dir(&piece.dir)
-        .env("KIT_CAPTURE_DIR", out)
-        .env("KIT_CAPTURE_FRAMES", &spec)
+    let mut child = capture_command(&bin, piece, out, &spec)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(std::fs::File::create(&stderr_file)?)
@@ -183,6 +192,27 @@ mod tests {
     fn timeout_scales_with_frames() {
         assert_eq!(timeout_for(59, 30), Duration::from_secs(68));
         assert_eq!(timeout_for(479, 60), Duration::from_secs(92));
+    }
+
+    #[test]
+    fn capture_command_sets_asset_root() {
+        let piece = Piece {
+            dir: PathBuf::from("/w/pieces/2026-01-01-x"),
+            folder: "2026-01-01-x".into(),
+            package: "wip-x".into(),
+            meta: meta(1.0),
+        };
+        let cmd = capture_command(Path::new("/t/wip-x"), &piece, Path::new("/o"), "0,1");
+        let env = |k: &str| {
+            cmd.get_envs()
+                .find(|(key, _)| *key == k)
+                .and_then(|(_, v)| v)
+                .map(|v| v.to_string_lossy().into_owned())
+        };
+        assert_eq!(env("BEVY_ASSET_ROOT").as_deref(), Some("/w/pieces/2026-01-01-x"));
+        assert_eq!(env("KIT_CAPTURE_DIR").as_deref(), Some("/o"));
+        assert_eq!(env("KIT_CAPTURE_FRAMES").as_deref(), Some("0,1"));
+        assert_eq!(cmd.get_current_dir(), Some(piece.dir.as_path()));
     }
 
     #[test]

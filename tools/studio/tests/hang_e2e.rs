@@ -55,9 +55,13 @@ fn hang_resumes_after_push_failure() {
         .join(format!(".sketches-e2e-{}", std::process::id()));
     let _cleanup = RemoveOnDrop(clone.clone());
     let remotes = tempfile::tempdir().unwrap();
-    // Build into the main target dir so nothing builds cold. Only this test runs
-    // in this binary, so changing the environment is safe.
-    unsafe { std::env::set_var("CARGO_TARGET_DIR", main_root.join("target")) };
+    // Build into the main target dir so nothing builds cold, and accept the local
+    // bare repo as origin. Only this test runs in this binary, so changing the
+    // environment is safe.
+    unsafe {
+        std::env::set_var("CARGO_TARGET_DIR", main_root.join("target"));
+        std::env::set_var("STUDIO_ALLOW_ANY_ORIGIN", "1");
+    }
 
     // 1. Clone, and point origin away from the real repo before anything else.
     run(
@@ -71,7 +75,11 @@ fn hang_resumes_after_push_failure() {
     git(&clone, &["config", "user.name", "Studio E2E"]);
     git(&clone, &["config", "user.email", "e2e@example.com"]);
     git(&clone, &["config", "commit.gpgsign", "false"]);
+    // hang pushes `main` only; the clone starts on whatever branch the real repo
+    // has checked out, so put that commit on a local `main`.
+    git(&clone, &["checkout", "-q", "-B", "main"]);
     let branch = git(&clone, &["branch", "--show-current"]);
+    assert_eq!(branch, "main");
 
     // 2. A one-second smoke piece, ready to hang.
     let ws = Workspace::discover(&clone).unwrap();
@@ -160,7 +168,21 @@ fn hang_resumes_after_push_failure() {
         );
         let frames = if file.starts_with("master") || file.starts_with("loop") { 60 } else { 900 };
         assert_eq!(probe, format!("{w},{h},{frames}"), "{file}");
+        let color = run(
+            &dir,
+            "ffprobe",
+            &[
+                "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=color_space,color_transfer,color_primaries",
+                "-of", "default=nw=1", file,
+            ],
+        );
+        for tag in ["color_space=bt709", "color_transfer=bt709", "color_primaries=bt709"] {
+            assert!(color.lines().any(|l| l == tag), "{file}: {color}");
+        }
     }
+    assert_eq!(media[1]["seconds"], 1.0);
+    assert_eq!(media[3]["seconds"], 15.0);
     assert!(!clone.join(".studio/hang/DSS0001").exists(), "frames left behind");
 
     // 5. Never overwrite a deposit.

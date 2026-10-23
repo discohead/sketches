@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 
 use crate::workspace::Workspace;
 
-/// One more than the highest number in `pieces/dss####-*` folders and
-/// `outbox/DSS####` deposits. Gaps are never filled. An empty workspace gives 1.
+/// One more than the highest number in `pieces/dss####-*` folders, any
+/// `catalog` written in a `piece.toml`, and `outbox/DSS####` deposits. Gaps are never filled. An empty workspace gives 1.
 pub fn next_number(ws: &Workspace) -> Result<u32> {
     let prefix = &ws.config.catalog.prefix;
     let mut max = 0;
@@ -18,6 +18,11 @@ pub fn next_number(ws: &Workspace) -> Result<u32> {
             && id.chars().all(|c| !c.is_ascii_uppercase())
             && let Some(n) = parse_catalog(prefix, id)
         {
+            max = max.max(n);
+        }
+    }
+    for piece in crate::pieces::all(ws)? {
+        if let Some(n) = piece.meta.catalog.as_deref().and_then(|c| parse_catalog(prefix, c)) {
             max = max.max(n);
         }
     }

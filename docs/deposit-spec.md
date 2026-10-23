@@ -44,6 +44,10 @@ Do not assume the list above is complete in later schema versions.
 
 ## The media
 
+Every video is H.264 in an MP4 container, converted from RGB with the BT.709
+matrix to limited ("TV") range, and tagged BT.709 for primaries, transfer and
+matrix. Play it as ordinary HD video; no colour management is needed.
+
 - **still.png**: one frame, chosen by the piece (`still_at` seconds in), at the
   native canvas size.
 - **master.mp4**: the archive copy. H.264 (libx264, `-preset slow -crf 10`),
@@ -61,8 +65,10 @@ Do not assume the list above is complete in later schema versions.
 
 ## piece.json
 
-UTF-8 JSON. Every key below is always present. Keys are never omitted to mean
-"empty"; `null` is used instead where noted.
+UTF-8 JSON. Every top-level key is always present; where a value can be absent,
+it is `null`, never a missing key. Inside `media`, the fields depend on the
+entry's `kind`: a still has no `seconds`, `fps` or `audio`, and only social cuts
+have `aspect`. The tables below say which fields each kind has.
 
 ```json
 {
@@ -148,7 +154,7 @@ Video entries (`master`, `web`, `social`) also have:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `seconds` | number | Length of this file. For social cuts this is the repeated length, so it can be longer than `time.seconds`. |
+| `seconds` | number | Length of this file: its frame count divided by `fps`, rounded to 3 decimals. This can differ from `time.seconds` by part of a frame. For social cuts it is the repeated length, so it can be longer than `time.seconds`. |
 | `fps` | integer | Frames per second. |
 | `audio` | boolean | Whether the file has a sound track. |
 
@@ -183,8 +189,9 @@ directory, `.DSS0001.partial/`, and renames it to `DSS0001/` only after every fi
 is complete and `piece.json` is written last. A directory whose name is a catalog
 number is always complete. Ignore anything whose name starts with a dot.
 
-A failed hang leaves a `.partial` directory behind. Re-running the hang replaces
-it.
+A failed hang leaves a `.partial` directory behind, and so does a hang run with
+`--no-push`, which commits without pushing and waits to be re-run. Re-running the
+hang replaces it.
 
 ## Immutability
 

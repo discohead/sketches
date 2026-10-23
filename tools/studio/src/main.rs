@@ -38,7 +38,8 @@ enum Cmd {
     /// Record, number, commit, push and deposit a finished piece
     Hang {
         piece: String,
-        /// Commit but do not push. The deposit then names a commit that is not public yet.
+        /// Commit but do not push. The deposit stays unfinished in outbox/.<catalog>.partial
+        /// until you re-run hang without --no-push.
         #[arg(long)]
         no_push: bool,
     },
