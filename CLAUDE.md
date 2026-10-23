@@ -65,13 +65,24 @@ capture in progress is left alone. Never stop a piece any broader way while a
 - The live window renders at exact canvas pixels. On a Retina display it looks
   half-size. That is intended: the preview matches the recording pixel for
   pixel.
+- **The canvas must fit on the display at exact pixels.** The live and capture
+  windows are canvas-sized, and macOS won't make a window larger than the
+  screen, so a canvas that doesn't fit records at the wrong size and `look` and
+  `hang` fail. Default to 1080 × 1080 and keep it. For portrait (1080 × 1920),
+  4K or anything larger than 1080 on a side, ask Jared first and check the
+  screen: `system_profiler SPDisplaysDataType | rg 'Resolution|Looks like'`.
+  The canvas in points (pixels ÷ 2 on Retina) plus about 60 for the title and
+  menu bars must fit inside "UI Looks like" of the display the window opens on
+  (with several displays, ask which). 1080 × 1920 does not fit on a 14"
+  MacBook Pro.
 - **Private materials stay private.** Materials are read at runtime by
   absolute path from `/Users/jaredmcfarland/Developer/sketches-private/materials/`
   and never copied under `pieces/`. `studio hang` commits everything in the
   piece folder and pushes it publicly. Use `include_bytes!` or a piece
   `assets/` folder only for files that can be public (WGSL, data you made). A
   hung piece that reads private materials won't rebuild on another machine;
-  that is accepted.
+  that is accepted. The code it publishes names the file by absolute path, so
+  give material files neutral names (`grain-01.jpg`, not a person or a place).
 - Assets load relative to the piece folder (`pieces/<folder>/assets/`) in
   `run`, `look` and `hang` alike. Run `studio look` early on any piece that
   loads files.

@@ -127,7 +127,10 @@ start. Don't announce the clock every time; mention it when it matters.
    variation. The slug is a short working name (lowercase, hyphens, unique);
    the title comes later. If the idea needs a different canvas or loop length
    (a 5:7 polyrhythm wants a loop that closes it), set `[canvas]` and `[time]`
-   in `piece.toml` now.
+   in `piece.toml` now. The canvas must fit on the display at exact pixels,
+   because the live window is canvas-sized: keep the default 1080 × 1080. For
+   portrait or 4K, ask Jared and check the screen first (the canvas rule in
+   `CLAUDE.md`).
 2. **Write** `src/main.rs`. Get a first image on screen within minutes; crude is
    fine. Follow the piece rules in `CLAUDE.md`, especially the capture-safe
    rule and seamless loops. Keep all code in the piece.
@@ -162,7 +165,8 @@ Materials are read at runtime by absolute path from
 under `pieces/`. `studio hang` commits everything in the piece folder and pushes
 it publicly. Use `include_bytes!` or a piece `assets/` folder only for files
 that can be public (WGSL, data you made). A hung piece that reads private
-materials won't rebuild elsewhere; that is accepted. If `materials/` has
+materials won't rebuild elsewhere; that is accepted. Its code names the file
+by absolute path, so material files need neutral names. If `materials/` has
 nothing fitting, offer the synthetic fallback the seed names, or ask
 Jared to drop a file in while you start on the synthetic version. A seed marked
 "sound: monitor live; recording is Phase 2" can play sound live through

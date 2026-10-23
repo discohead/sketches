@@ -112,6 +112,17 @@ fn png_size(path: &Path) -> Result<(u32, u32)> {
     Ok((w, h))
 }
 
+/// The error for a frame whose size is not the canvas size.
+fn size_mismatch(k: u64, (pw, ph): (u32, u32), (w, h): (u32, u32)) -> String {
+    format!(
+        "frame {k} is {pw}x{ph} but the canvas is {w}x{h}. The likely cause is a \
+         canvas that does not fit on the display at exact pixels: the window is \
+         canvas-sized, and macOS limits a window to the screen. \
+         Use a smaller canvas (the default 1080x1080 fits), or check the screen \
+         with `system_profiler SPDisplaysDataType`."
+    )
+}
+
 fn last_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(n)..].join("\n")
@@ -210,7 +221,7 @@ pub fn render(ws: &Workspace, piece: &Piece, frames: &[u64], out: &Path) -> Resu
         }
         let (pw, ph) = png_size(&p)?;
         if (pw, ph) != (w, h) {
-            bail!("frame {k} is {pw}x{ph} but the canvas is {w}x{h}");
+            bail!("{}", size_mismatch(k, (pw, ph), (w, h)));
         }
         paths.push(p);
     }
@@ -340,6 +351,14 @@ mod tests {
         assert_eq!(env("KIT_CAPTURE_DIR").as_deref(), Some("/o"));
         assert_eq!(env("KIT_CAPTURE_FRAMES").as_deref(), Some("0,1"));
         assert_eq!(cmd.get_current_dir(), Some(piece.dir.as_path()));
+    }
+
+    #[test]
+    fn size_mismatch_names_the_display_as_a_likely_cause() {
+        let m = size_mismatch(3, (540, 960), (1080, 1920));
+        assert!(m.starts_with("frame 3 is 540x960 but the canvas is 1080x1920"), "{m}");
+        assert!(m.contains("does not fit on the display"), "{m}");
+        assert!(m.contains("1080x1080"), "{m}");
     }
 
     #[test]
