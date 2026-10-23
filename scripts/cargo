@@ -1,2 +1,4 @@
 #!/usr/bin/env bash
+# Put rustup's proxies first so cargo also finds the pinned rustc/rustdoc.
+export PATH="$HOME/.cargo/bin:$PATH"
 exec "$HOME/.cargo/bin/cargo" "$@"
