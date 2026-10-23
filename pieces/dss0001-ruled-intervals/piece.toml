@@ -1,0 +1,18 @@
+title = "5 in 13"
+slug = "ruled-intervals"
+created = "2026-10-22"
+statement = "Horizontal rules, heavy on five of every thirteen, rotate through a Euclidean rhythm one step per beat."
+tags = ["2d", "euclidean", "rhythm", "lines"]
+live = false
+audio = false
+catalog = "DSS0001"
+
+[canvas]
+width = 1080
+height = 1080
+
+[time]
+fps = 60
+form = "loop"
+seconds = 6.5
+still_at = 0.0

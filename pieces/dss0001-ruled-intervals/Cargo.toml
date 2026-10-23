@@ -1,0 +1,9 @@
+[package]
+name = "dss0001-ruled-intervals"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+nannou = { workspace = true }
+kit = { workspace = true }
+bevy = { workspace = true }
