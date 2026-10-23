@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use studio::workspace::Workspace;
-use studio::{doctor, new, pieces};
+use studio::{capture, doctor, media, new, pieces};
 
 #[derive(Parser)]
 #[command(name = "studio", about = "Create, list and run art pieces")]
@@ -25,6 +25,16 @@ enum Cmd {
     List,
     /// Run a piece in a window
     Run { piece: String },
+    /// Render frames of a piece and print the path of a contact sheet
+    Look {
+        piece: String,
+        /// Times in seconds, comma separated (default: evenly spaced)
+        #[arg(long, value_delimiter = ',')]
+        at: Vec<f32>,
+        /// How many evenly spaced frames to render when --at is not given
+        #[arg(long, default_value_t = 6)]
+        count: usize,
+    },
 }
 
 fn main() {
@@ -65,6 +75,28 @@ fn real_main() -> Result<i32> {
             let p = pieces::resolve(&ws, &piece)?;
             let status = ws.cargo().args(["run", "-p", &p.package]).status()?;
             Ok(status.code().unwrap_or(1))
+        }
+        Cmd::Look { piece, at, count } => {
+            let p = pieces::resolve(&ws, &piece)?;
+            let times = if at.is_empty() {
+                if count == 0 {
+                    anyhow::bail!("--count must be at least 1");
+                }
+                capture::evenly_spaced(&p.meta, count)
+            } else {
+                at
+            };
+            let frames = capture::frames_for_times(&times, p.meta.time.fps);
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+            let out = ws.root.join(".studio/look").join(&p.folder).join(stamp);
+            let paths = capture::render(&ws, &p, &frames, &out)?;
+            let sheet = out.join("montage.png");
+            media::montage(&ws, &paths, &sheet)?;
+            println!("{}", sheet.display());
+            for f in &paths {
+                println!("{}", f.display());
+            }
+            Ok(0)
         }
     }
 }
