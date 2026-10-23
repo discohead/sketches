@@ -6,6 +6,7 @@ members = ["lib/*", "tools/*", "pieces/*"]
 edition = "2024"
 
 [workspace.dependencies]
+piece-meta = { path = "lib/piece-meta" }
 nannou = { path = "../nannou-sketches/nannou" }
 bevy = { version = "0.19.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
