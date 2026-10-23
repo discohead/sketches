@@ -1,2 +1,15 @@
 #!/usr/bin/env bash
-cd "$(dirname "$0")/.." && exec scripts/cargo run -q -p studio -- "$@"
+cd "$(dirname "$0")/.." || exit 1
+# Cargo's `pieces/*` member glob takes every folder under pieces/, dotted ones
+# too, and one without a Cargo.toml stops every cargo command in the workspace,
+# including this one. Name it plainly instead of cargo's manifest error.
+shopt -s nullglob dotglob
+for d in pieces/*/; do
+  if [ ! -f "$d/Cargo.toml" ]; then
+    echo "error: ${d%/} has no Cargo.toml, so cargo cannot load the workspace." >&2
+    echo "Remove it if it is empty or left over from a failed command; otherwise restore its Cargo.toml." >&2
+    exit 1
+  fi
+done
+shopt -u nullglob dotglob
+exec scripts/cargo run -q -p studio -- "$@"

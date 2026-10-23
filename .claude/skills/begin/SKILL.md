@@ -189,9 +189,10 @@ Jared's rule: art first; tooling only after the piece is hung.
 
 - **A variation** is a new piece made from an existing one with
   `scripts/studio new <slug> --from <piece>`. It starts as a copy of the
-  parent's code, canvas and time, and records `parent`. It needs its own slug.
-  `--from` copies only `src/`: copy any extra `[dependencies]` from the
-  parent's `Cargo.toml` by hand, and set `series` if the parent had one. Hung
+  parent's folder (`src/`, `assets/`, other files, and its `Cargo.toml`
+  dependencies, but not `target/` or dotfiles), keeps its canvas, time, `live`
+  and `audio`, and records `parent`. Title, statement, tags, series and catalog
+  start empty. It needs its own slug. Set `series` if the parent had one. Hung
   pieces are never edited; variations are how you go back to them.
 - **A series** is a named group of pieces exploring one vein. When you notice
   one forming (a third or fourth variation on the same idea), say so: "Fourth

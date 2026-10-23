@@ -18,7 +18,7 @@ Bevy 0.19.
 
 | Command | What it does |
 | --- | --- |
-| `scripts/studio new <slug> [--from <piece>]` | Creates `pieces/<YYYY-MM-DD>-<slug>/` with `piece.toml`, `Cargo.toml` (package `wip-<slug>`) and `src/main.rs`. `--from` copies another piece as a variation. |
+| `scripts/studio new <slug> [--from <piece>]` | Creates `pieces/<YYYY-MM-DD>-<slug>/` with `piece.toml`, `Cargo.toml` (package `wip-<slug>`) and `src/main.rs`. `--from <piece>` makes a variation: it copies the parent's folder (`src/`, `assets/`, other files; not `target/` or dotfiles), keeps its `Cargo.toml` dependencies, and writes a fresh `piece.toml` that records `parent` and keeps its canvas, time, `live` and `audio`. |
 | `scripts/studio list` | Lists every piece, hung and in progress. |
 | `scripts/studio run <piece>` | Builds and opens the live window. It blocks, so run it in the background, and stop the previous run first. A rebuild after an edit takes about 1 s; a new piece about 3 s. |
 | `scripts/studio look <piece> [--at 0,1.5,3] [--count 6]` | Renders frames offline. Prints the montage path first, then each frame. A small capture window flashes briefly; that is expected. |
@@ -27,6 +27,12 @@ Bevy 0.19.
 | `scripts/cargo …` | Cargo with the pinned toolchain. |
 
 `<piece>` is a folder name under `pieces/`, its slug, or its catalog number.
+
+Every folder under `pieces/`, dotted ones included, must hold a `Cargo.toml`:
+cargo's `pieces/*` member glob takes them all, and one without a manifest makes
+every cargo command fail with "failed to load manifest for workspace member".
+`scripts/studio` names the folder before running cargo. Remove it if it is empty
+or left over.
 
 To stop a running piece, run:
 
@@ -79,8 +85,7 @@ capture in progress is left alone. Never stop a piece any broader way while a
   ```
 
   The workspace `image` is PNG-only; add `"jpeg"` (or another format) in the
-  piece. `studio new --from` does not copy the parent's extra dependencies yet;
-  copy them by hand.
+  piece. `studio new --from` keeps the parent's dependencies.
 - Nannou's examples for this version are in
   `/Users/jaredmcfarland/Developer/nannou-sketches/examples/`. Read the
   matching one before using a medium for the first time.
