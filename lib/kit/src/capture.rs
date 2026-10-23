@@ -32,6 +32,8 @@ use bevy::render::view::ExtractedWindows;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::time::{TimeSystems, TimeUpdateStrategy};
+use bevy::window::{PrimaryWindow, Window, WindowLevel};
+use bevy::winit::{UpdateMode, WinitSettings};
 
 pub(crate) const DIR_VAR: &str = "KIT_CAPTURE_DIR";
 pub(crate) const FRAMES_VAR: &str = "KIT_CAPTURE_FRAMES";
@@ -231,6 +233,29 @@ impl Plugin for CapturePlugin {
             .add_systems(PostUpdate, capture_frame)
             .add_systems(Last, hold_frame_count.after(update_frame_count));
 
+        // Capture runs while someone works, so the window must not take keyboard focus. macOS
+        // gives an occluded window no swapchain texture, so it cannot sit behind other windows
+        // either: it floats on top (`AlwaysOnTop`) without becoming key (`focused: false`), and
+        // updates at full speed while unfocused.
+        app.insert_resource(WinitSettings {
+            focused_mode: UpdateMode::Continuous,
+            unfocused_mode: UpdateMode::Continuous,
+        })
+        .add_observer(
+            |add: On<Add, PrimaryWindow>, mut windows: Query<&mut Window>| {
+                if let Ok(mut window) = windows.get_mut(add.entity) {
+                    window.focused = false;
+                    window.window_level = WindowLevel::AlwaysOnTop;
+                }
+            },
+        );
+
+        // winit activates the app at launch (`activateIgnoringOtherApps`) and bevy_winit
+        // offers no way to configure that, so hand activation straight back.
+        #[cfg(target_os = "macos")]
+        app.insert_non_send(focus::frontmost_other_app())
+            .add_systems(First, focus::give_back);
+
         let status = app.world().resource::<WindowStatus>().clone();
         app.sub_app_mut(RenderApp)
             .insert_resource(status)
@@ -373,6 +398,44 @@ fn save_frame(path: PathBuf) -> impl FnMut(On<ScreenshotCaptured>, ResMut<Captur
             Err(e) => {
                 error!("kit capture: {e:#}");
                 capture.progress.failed += 1;
+            }
+        }
+    }
+}
+
+/// macOS: keep keyboard focus with the app that was frontmost when capture started.
+#[cfg(target_os = "macos")]
+mod focus {
+    use bevy::ecs::prelude::*;
+    use objc2::runtime::NSObjectProtocol;
+    use objc2_app_kit::{
+        NSApplication, NSApplicationActivationOptions, NSRunningApplication, NSWorkspace,
+    };
+    use objc2_foundation::MainThreadMarker;
+
+    /// The app that was frontmost at launch, unless that was this process. A non-send
+    /// resource, so systems that use it run on the main thread, as AppKit requires.
+    pub(super) struct PreviousApp(pub(super) Option<objc2::rc::Retained<NSRunningApplication>>);
+
+    pub(super) fn frontmost_other_app() -> PreviousApp {
+        // SAFETY: plain AppKit queries with no preconditions.
+        let front = unsafe {
+            NSWorkspace::sharedWorkspace()
+                .frontmostApplication()
+                .filter(|app| !app.isEqual(&NSRunningApplication::currentApplication()))
+        };
+        PreviousApp(front)
+    }
+
+    /// Whenever this app is active, reactivates the previous one.
+    pub(super) fn give_back(previous: NonSend<PreviousApp>) {
+        let (Some(app), Some(mtm)) = (previous.0.as_ref(), MainThreadMarker::new()) else {
+            return;
+        };
+        // SAFETY: on the main thread (checked above); plain AppKit calls.
+        unsafe {
+            if NSApplication::sharedApplication(mtm).isActive() {
+                app.activateWithOptions(NSApplicationActivationOptions::empty());
             }
         }
     }
