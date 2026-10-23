@@ -107,11 +107,14 @@ scripts/studio hang <piece>
 ```
 
 It renders every frame and encodes several videos. Capture costs about 5 s per
-second of piece, so an 8 s loop takes a minute or two. For pieces up to about
-20 s, run it in the foreground with a 10-minute timeout. For longer pieces, run
-it as a background command and wait for it to finish (a 60 s piece spends about
-300 s on capture alone). It refuses an unready piece and lists
-the reasons. Otherwise it:
+second of piece, more for heavy 3D or shader pieces, so an 8 s loop takes a
+minute or two. For pieces up to about 20 s, run it in the foreground with a
+10-minute timeout. For longer pieces, run it as a background command and wait
+for it to finish (a 60 s piece spends about 300 s on capture alone). Studio
+stops a capture only when no new frame has appeared for 60 s, or when it passes
+a cap of 60 s plus 30 s per second of piece, so a slow piece that keeps
+rendering is not cut off. It refuses an unready piece and lists the reasons.
+Otherwise it:
 
 1. Assigns the next catalog number (DSS0001, …).
 2. Renders every frame and encodes the still, the master, the web loop, and the

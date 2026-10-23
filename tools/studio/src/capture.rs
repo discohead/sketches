@@ -12,10 +12,63 @@ use piece_meta::PieceMeta;
 use crate::pieces::Piece;
 use crate::workspace::Workspace;
 
-/// `60 s + 4 × (max_frame + 1) / fps`, rounded up to whole seconds.
-pub fn timeout_for(max_frame: u64, fps: u32) -> Duration {
-    let fps = fps.max(1) as u64;
-    Duration::from_secs(60 + (4 * (max_frame + 1)).div_ceil(fps))
+/// When a capture run counts as stuck. Rendering speed varies a lot (a heavy
+/// shader, a long piece), so a run is stopped when frames stop arriving, not
+/// when it has taken long. The total cap is a backstop for a piece that crawls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptureLimits {
+    /// From launch (after the build) to the first frame: startup and warm-up.
+    pub first_frame: Duration,
+    /// From one saved frame to the next: `max(60 s, 20 frame intervals)`.
+    pub between_frames: Duration,
+    /// The whole run: `60 s + 30 s × (max_frame + 1) / fps`, rounded up.
+    pub total: Duration,
+}
+
+impl CaptureLimits {
+    pub fn for_frames(max_frame: u64, fps: u32) -> CaptureLimits {
+        let fps = u64::from(fps.max(1));
+        let twenty_frames = Duration::from_secs_f64(20.0 / fps as f64);
+        CaptureLimits {
+            first_frame: Duration::from_secs(60),
+            between_frames: twenty_frames.max(Duration::from_secs(60)),
+            total: Duration::from_secs(60 + (30 * (max_frame + 1)).div_ceil(fps)),
+        }
+    }
+
+    /// Why the run should be stopped, given the time since it started, the time
+    /// since the last new frame (or since the start), and the frames saved so far.
+    /// `None` means let it run.
+    pub fn exceeded(&self, elapsed: Duration, since_progress: Duration, done: usize) -> Option<String> {
+        if elapsed > self.total {
+            return Some(format!("it ran past the {} s cap for this piece", self.total.as_secs()));
+        }
+        if done == 0 && since_progress > self.first_frame {
+            return Some(format!(
+                "no frame was saved in the first {} s (startup and warm-up)",
+                self.first_frame.as_secs()
+            ));
+        }
+        if done > 0 && since_progress > self.between_frames {
+            return Some(format!(
+                "no new frame for {} s after {done} frames",
+                self.between_frames.as_secs()
+            ));
+        }
+        None
+    }
+}
+
+/// `KIT_CAPTURE_FRAMES` for `frames` (sorted): a half-open range `a..b` when
+/// they are contiguous, otherwise a comma list. A long piece is thousands of
+/// frames, too much to pass as a list in the environment.
+pub fn frame_spec(frames: &[u64]) -> String {
+    match frames {
+        [first, .., last] if frames.windows(2).all(|w| w[1] == w[0] + 1) => {
+            format!("{first}..{}", last + 1)
+        }
+        _ => frames.iter().map(u64::to_string).collect::<Vec<_>>().join(","),
+    }
 }
 
 /// `round(t * fps)` for each time, sorted and deduplicated.
@@ -100,7 +153,7 @@ pub fn render(ws: &Workspace, piece: &Piece, frames: &[u64], out: &Path) -> Resu
     if !bin.is_file() {
         bail!("built {} but cannot find the binary at {}", piece.package, bin.display());
     }
-    let spec = frames.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
+    let spec = frame_spec(frames);
     let stderr_file = out.join("stderr.log");
     let mut child = capture_command(&bin, piece, out, &spec)
         .stdin(Stdio::null())
@@ -109,20 +162,28 @@ pub fn render(ws: &Workspace, piece: &Piece, frames: &[u64], out: &Path) -> Resu
         .spawn()
         .with_context(|| format!("cannot start {}", bin.display()))?;
 
-    let limit = timeout_for(max_frame, piece.meta.time.fps);
+    // Frames are saved in order, so progress is the next expected frame
+    // appearing on disk.
+    let limits = CaptureLimits::for_frames(max_frame, piece.meta.time.fps);
     let start = Instant::now();
+    let mut last_progress = start;
+    let mut done = 0;
     let status = loop {
         if let Some(s) = child.try_wait()? {
             break s;
         }
-        if start.elapsed() > limit {
+        while done < frames.len() && frame_path(out, frames[done]).is_file() {
+            done += 1;
+            last_progress = Instant::now();
+        }
+        if let Some(why) = limits.exceeded(start.elapsed(), last_progress.elapsed(), done) {
             let _ = child.kill();
             let _ = child.wait();
             bail!(
-                "{} did not finish capturing within {} s and was stopped. \
+                "{} was stopped after saving {done} of {} frames: {why}. \
                  Its update loop may be stuck.",
                 piece.folder,
-                limit.as_secs()
+                frames.len()
             );
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -188,10 +249,76 @@ mod tests {
         }
     }
 
+    const S: fn(u64) -> Duration = Duration::from_secs;
+
     #[test]
-    fn timeout_scales_with_frames() {
-        assert_eq!(timeout_for(59, 30), Duration::from_secs(68));
-        assert_eq!(timeout_for(479, 60), Duration::from_secs(92));
+    fn limits_for_an_eight_second_loop() {
+        let l = CaptureLimits::for_frames(479, 60);
+        assert_eq!(l.first_frame, S(60));
+        assert_eq!(l.between_frames, S(60));
+        assert_eq!(l.total, S(60 + 240)); // 60 s + 30 s × 8 s
+    }
+
+    #[test]
+    fn limits_cap_scales_with_piece_length() {
+        assert_eq!(CaptureLimits::for_frames(59, 30).total, S(60 + 60));
+        assert_eq!(CaptureLimits::for_frames(3599, 60).total, S(60 + 1800));
+        // A fraction of a second rounds up.
+        assert_eq!(CaptureLimits::for_frames(0, 60).total, S(61));
+    }
+
+    #[test]
+    fn limits_never_wait_less_than_a_minute_between_frames() {
+        for fps in [1, 24, 60, 120] {
+            assert_eq!(CaptureLimits::for_frames(10, fps).between_frames, S(60), "{fps}");
+        }
+    }
+
+    #[test]
+    fn slow_but_steady_long_piece_is_never_stopped() {
+        // A 60 s piece at 60 fps that renders at only 2.5 fps: 1440 s in all,
+        // far past the old total-time limit, with a frame every 0.4 s.
+        let l = CaptureLimits::for_frames(3599, 60);
+        let startup = Duration::from_secs(45);
+        let step = Duration::from_millis(400);
+        assert_eq!(l.exceeded(startup, startup, 0), None);
+        for done in 1..=3600u32 {
+            let elapsed = startup + step * done;
+            assert_eq!(l.exceeded(elapsed, Duration::ZERO, done as usize), None);
+            assert_eq!(l.exceeded(elapsed + step, step, done as usize), None);
+        }
+    }
+
+    #[test]
+    fn stopped_when_no_first_frame_within_a_minute() {
+        let l = CaptureLimits::for_frames(479, 60);
+        assert_eq!(l.exceeded(S(59), S(59), 0), None);
+        let why = l.exceeded(S(61), S(61), 0).unwrap();
+        assert!(why.contains("no frame") && why.contains("60 s"), "{why}");
+    }
+
+    #[test]
+    fn stopped_when_frames_stop_arriving() {
+        let l = CaptureLimits::for_frames(479, 60);
+        assert_eq!(l.exceeded(S(200), S(59), 100), None);
+        let why = l.exceeded(S(200), S(61), 100).unwrap();
+        assert!(why.contains("no new frame for 60 s"), "{why}");
+    }
+
+    #[test]
+    fn stopped_at_the_cap_even_while_frames_arrive() {
+        let l = CaptureLimits::for_frames(479, 60);
+        let why = l.exceeded(S(301), S(0), 470).unwrap();
+        assert!(why.contains("300 s"), "{why}");
+    }
+
+    #[test]
+    fn frame_spec_uses_a_range_when_contiguous() {
+        assert_eq!(frame_spec(&[0, 1, 2, 3]), "0..4");
+        assert_eq!(frame_spec(&(0..3600).collect::<Vec<_>>()), "0..3600");
+        assert_eq!(frame_spec(&[5]), "5");
+        assert_eq!(frame_spec(&[0, 30, 60]), "0,30,60");
+        assert_eq!(frame_spec(&[0, 1, 3]), "0,1,3");
     }
 
     #[test]
