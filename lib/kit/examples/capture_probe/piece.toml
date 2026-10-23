@@ -1,0 +1,17 @@
+title = "Capture Probe"
+slug = "capture-probe"
+created = "2026-10-22"
+statement = "One disc slides back and forth; used to test frame-locked capture."
+tags = []
+live = false
+audio = false
+
+[canvas]
+width = 540
+height = 360
+
+[time]
+fps = 30
+form = "loop"
+seconds = 2.0
+still_at = 0.0
