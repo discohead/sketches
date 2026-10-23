@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["lib/*", "tools/*", "pieces/*"]
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+nannou = { path = "../nannou-sketches/nannou" }
+bevy = { version = "0.19.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_json = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+chrono = "0.4"
+tempfile = "3"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

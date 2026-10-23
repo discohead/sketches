@@ -1,0 +1,11 @@
+[catalog]
+prefix = "DSS"
+
+[deposit]
+dir = "outbox"
+
+[private]
+dir = "../sketches-private"
+
+[nannou]
+worktree = "../nannou-sketches"
