@@ -3,7 +3,9 @@
 Read `/Users/jaredmcfarland/Developer/writings/.claude/skills/patch-bay/aesthetic.md`
 first. It is the shared core: who Jared is, his influences, film and color
 grading, label culture, plain English, Tahoe, and "art first, ship it." Do not
-copy it here. Everything in it applies unchanged.
+copy it here. The parts about who Jared is apply unchanged. (Its knob tables
+and signature moves are for the writing site's patches; they don't apply
+here.)
 
 This file adds the layer the writing site does not need: image, motion, time,
 3D, shaders, source material, and sound. The core's one-line target is
@@ -16,8 +18,8 @@ system, given time.**
   Alva Noto and the Raster-Noton catalog work almost entirely in it.
 - Color has to earn its place. When it comes in, it is usually one color, used
   for one job: a signal, a cut, a state change, the thing the eye should find.
-  His first AV piece is the model: electric blue on true black, flashing cold
-  on each note. One color, one meaning.
+  His first AV piece, described in the core, is the model: one color, one
+  meaning.
 - Warmth is allowed and welcome (Balearic, disco, bossa, Tahoe at dawn). Warmth
   here means a considered grade, a soft value range, grain, a slow ease. It does
   not mean more hues.

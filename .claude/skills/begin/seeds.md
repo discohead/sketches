@@ -18,10 +18,12 @@ How to use this bank:
   recording lands, so the image must stand on its own. Keep `audio = false` in
   `piece.toml`.
 - Seeds marked **needs material** read a source file from
-  `/Users/jaredmcfarland/Developer/sketches-private/materials/`. If the folder
-  has nothing fitting, say so and offer two ways on: a synthetic source made in
-  code (named in the seed), or ask Jared to drop a file in and carry on with
-  another seed while he finds one.
+  `/Users/jaredmcfarland/Developer/sketches-private/materials/`, by absolute
+  path at runtime; never copy the file into the piece, because a hang pushes
+  the piece folder publicly. If the folder has nothing fitting, say so and
+  offer two ways on: a synthetic source made in code (named in the seed), or
+  ask Jared to drop a file in and carry on with another seed while he finds
+  one.
 - Nannou's own examples show how each medium works in this version:
   `/Users/jaredmcfarland/Developer/nannou-sketches/examples/` (`draw/`,
   `bevy/`, `compute/`, `video/`, `audio/`, `wgpu/`). Read the matching one
@@ -42,10 +44,11 @@ How to use this bank:
   angle that sweeps across the loop, so the beat pattern between them is the
   image. Rule: only two grids, both plain; everything you see is their
   interference.
-- **Lissajous ratios.** Lineage: Jared's own Curves engine and his first AV
-  piece. Technique: a single curve tracing a 3:4 or 5:7 ratio, drawn with a
-  short decaying history of points, never a full trail. Rule: one curve, one
-  ratio, and the loop length closes the figure exactly.
+- **Ruled intervals.** Lineage: Agnes Martin's ruled grids; Godfried
+  Toussaint's Euclidean rhythms. Technique: a frame of horizontal rules whose
+  thicknesses follow a Euclidean rhythm (5 in 13, say); the pattern rotates by
+  one step on each beat. Rule: only horizontal rules, and the rhythm sets every
+  thickness.
 - **Stochastic score.** Lineage: Iannis Xenakis, *Pithoprakta* and the UPIC
   drawings. Technique: short line segments placed by a Poisson process in time
   and a Gaussian in pitch (vertical position), seeded so the loop repeats.
@@ -53,23 +56,29 @@ How to use this bank:
 
 ## 3D
 
-- **Orthographic city of bars.** Lineage: Ikeda, *data.matrix*; Raster-Noton
-  sleeves. Technique: a field of thin boxes in orthographic projection, heights
-  driven by a data stream, lit only by value (no colored lights). Rule:
-  orthographic camera, no perspective, no color.
+- **Byte relief.** Lineage: Ikeda, *data.matrix*; Raster-Noton sleeves.
+  Technique: the bytes of a real file (the piece's own `main.rs` through
+  `include_bytes!`, or a hash stream) become a 64 × 64 field of square columns,
+  seen in orthographic projection from almost straight above, so height shows
+  only as a shift in value and a sliver of edge. A scan line passes through
+  and lifts each row in turn. Rule: top-down and orthographic, with no
+  baseline, axes or labels; it must never read as a bar chart.
 - **One plane, turning.** Lineage: Donald Judd's stacks; Larry Bell's glass
   cubes. Technique: a single thin plane rotating slowly about an off-center
   axis, its edge catching a hard light once per loop. Rule: one object, one
   light, one event per loop.
-- **Point cloud of a signal.** Lineage: Curtis Roads, *Microsound*; oscilloscope
-  phase plots. Technique: plot a signal in three dimensions (x = t, y =
-  value, z = value delayed by a few samples) as points; rotate the camera
-  slowly around the attractor shape that forms. Rule: points only, no lines,
+- **Point cloud of a signal.** Lineage: Curtis Roads, *Microsound*; Takens
+  delay embedding; oscilloscope phase plots. Technique: plot a signal as
+  points in three dimensions (x = value, y = value a few samples earlier, z =
+  value twice that delay earlier). The camera stays fixed at one oblique
+  angle; the signal's parameters drift across the loop, so the figure folds
+  and unfolds in place. Rule: the camera never moves; points only, no lines,
   no surfaces.
-- **Depth as value.** Lineage: Nicolas Bernier, *frequencies*; film depth
-  passes. Technique: a 3D scene rendered so that brightness is depth alone
-  (near is white, far is black), with geometry that rearranges on a grid.
-  Rule: value carries all the information; no shading model.
+- **Depth as value.** Lineage: the Z-depth pass from film compositing,
+  Jared's post-production trade. Technique: a 3D scene rendered so that
+  brightness is depth alone (near is white, far is black), with geometry that
+  rearranges on a grid. Rule: value carries all the information; no shading
+  model.
 
 ## Shaders
 
@@ -84,10 +93,12 @@ How to use this bank:
   frequencies, nothing else.
 - **Cellular rule.** Lineage: Stephen Wolfram's elementary automata; Autechre's
   rule-based patterning. Technique: a compute or feedback shader runs a 1D rule
-  (rule 30, 110) one row per frame, scrolling. Rule: the rule is fixed; only
-  the starting row changes. Make the loop seamless by choosing the period, or
-  hang it as a fixed duration.
-- **Signed distance grid.** Lineage: Ikeda, *spectra*; technical drawing.
+  (rule 30, 110), one generation each time `elapsed_frames()` advances,
+  scrolling. Rule: the rule is fixed, and the starting row is real data (the
+  bits of a file, a date, a hash), never random. It won't loop on its own:
+  hang it as `form = "duration"`, or find the period and loop on it.
+- **Signed distance grid.** Lineage: topographic contour maps; Inigo
+  Quilez's distance functions.
   Technique: an SDF of simple shapes rendered as contour lines only, one pixel
   wide, while the shapes drift on integer steps. Rule: contours only, never a
   filled shape.
@@ -108,12 +119,17 @@ How to use this bank:
   *Stainless*. **needs material** (synthetic fallback: a rendered moving
   pattern stored as a ring buffer of frames). Technique: each column of the
   output comes from a different moment of the source, so time becomes an axis
-  of space. Rule: one axis is time; never show an unprocessed frame.
-- **Pixel sort to a threshold.** Lineage: Kim Asendorf's pixel sorting; Oval's
-  skipping CDs. **needs material** (synthetic fallback: a high-contrast
-  generated image of rectangles and grain). Technique: sort runs of pixels by
-  brightness wherever they cross a threshold, and sweep the threshold through
-  the loop. Rule: grayscale only; the threshold is the instrument.
+  of space. Rule: one axis is time; never show an unprocessed frame. To loop
+  seamlessly, make the source loop on the piece's loop length and pre-fill the
+  buffer with one full buffer of source before the first frame. Otherwise hang
+  it as `form = "duration"`.
+- **Long exposure.** Lineage: Hiroshi Sugimoto, *Theaters*; Jason Salavon,
+  *The Top Grossing Film of All Time, 1 x 1*. **needs material** (synthetic
+  fallback: a rendered clip of a few bars crossing the frame). Technique: each
+  output frame is the mean of a window of source frames; the window's length
+  swells from one frame to the whole clip and back across the loop, so the
+  image moves between a moment and its average. Rule: every pixel is a mean of
+  source pixels, and nothing else is done to it.
 - **Re-quantized frame.** Lineage: Alva Noto and Ikeda's bit-depth play;
   Raster-Noton sleeves. **needs material** (synthetic fallback: a generated
   smooth gradient field). Technique: reduce a source to 1-bit with ordered

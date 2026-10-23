@@ -131,8 +131,10 @@ start. Don't announce the clock every time; mention it when it matters.
 2. **Write** `src/main.rs`. Get a first image on screen within minutes; crude is
    fine. Follow the piece rules in `CLAUDE.md`, especially the capture-safe
    rule and seamless loops. Keep all code in the piece.
-3. **Run.** Stop the previous run first (stop its background task, or
-   `pkill -f 'target/debug/(wip-|dss[0-9])'`), then start
+3. **Run.** Stop the previous run first with the command in `CLAUDE.md`
+   (`for p in $(pgrep -f 'target/debug/studio run '); do pkill -P "$p"; done`).
+   It touches only `studio run` windows; never stop pieces any broader way
+   while a `look` or `hang` is running. Then start
    `scripts/studio run <piece>` as a background command (it blocks until the
    window closes). Every edit needs a stop and
    a re-run; a rebuild takes about a second. If the build fails, read the
@@ -154,8 +156,14 @@ close.
 **Media notes.** The first time a piece uses 3D, a shader, video, image
 material or audio, read the matching example in
 `/Users/jaredmcfarland/Developer/nannou-sketches/examples/` before writing
-code. Image and video seeds need a file in the private `materials/` folder. If
-it has nothing fitting, offer the synthetic fallback the seed names, or ask
+code. Image and video seeds need a file in the private `materials/` folder.
+Materials are read at runtime by absolute path from
+`/Users/jaredmcfarland/Developer/sketches-private/materials/` and never copied
+under `pieces/`. `studio hang` commits everything in the piece folder and pushes
+it publicly. Use `include_bytes!` or a piece `assets/` folder only for files
+that can be public (WGSL, data you made). A hung piece that reads private
+materials won't rebuild elsewhere; that is accepted. If `materials/` has
+nothing fitting, offer the synthetic fallback the seed names, or ask
 Jared to drop a file in while you start on the synthetic version. A seed marked
 "sound: monitor live; recording is Phase 2" can play sound live through
 `nannou_audio`, but it hangs silent with `audio = false`, so the image has to
@@ -223,9 +231,11 @@ Before the session ends, whether or not a piece was hung:
    cliché, add it to the cliché list too.
 6. **Commit.** The private repo:
    `git -C /Users/jaredmcfarland/Developer/sketches-private add -A`, then
-   commit with a one-line message such as `session 2026-10-22`. In this repo,
-   if `docs/aesthetic.md` or `docs/lexicon.md` changed, commit just those paths
-   (`git commit -m "..." -- docs/aesthetic.md docs/lexicon.md`). Don't push; the
+   commit with a message such as `session 2026-10-22`. In this repo, if
+   `docs/aesthetic.md` or `docs/lexicon.md` changed, commit just those paths
+   (`git commit -- docs/aesthetic.md docs/lexicon.md` with a message). Every
+   commit, in both repos, ends with a blank line and
+   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Don't push; the
    next hang pushes them.
 
 Say goodnight in a line. If a piece was hung, that's the headline.

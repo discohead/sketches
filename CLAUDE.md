@@ -28,8 +28,15 @@ Bevy 0.19.
 
 `<piece>` is a folder name under `pieces/`, its slug, or its catalog number.
 
-To stop a running piece: stop the background task you started, or run
-`pkill -f 'target/debug/(wip-|dss[0-9])'`.
+To stop a running piece, run:
+
+```sh
+for p in $(pgrep -f 'target/debug/studio run '); do pkill -P "$p"; done
+```
+
+It kills only the windows that `studio run` started, so a `look` or `hang`
+capture in progress is left alone. Never stop a piece any broader way while a
+`look` or `hang` is running.
 
 ## Writing a piece
 
@@ -42,7 +49,9 @@ To stop a running piece: stop the background task you started, or run
   `app.elapsed_frames()` or `kit::loop_phase(app)`. A piece that simulates must
   step by `app.time_delta()`, never a fixed amount per update. Capture runs a
   variable number of warm-up updates with time held at 0, and recordings are
-  frame-locked, so anything else renders differently each time.
+  frame-locked, so anything else renders differently each time. Discrete steps
+  (a cellular automaton generation, a new grain) advance when
+  `app.elapsed_frames()` changes, never once per update.
 - **Seamless loops.** For `form = "loop"`, the state at `t = seconds` must
   equal the state at `t = 0`. Drive periodic motion from `loop_phase`, and make
   every frequency a whole number of cycles per loop.
@@ -50,14 +59,28 @@ To stop a running piece: stop the background task you started, or run
 - The live window renders at exact canvas pixels. On a Retina display it looks
   half-size. That is intended: the preview matches the recording pixel for
   pixel.
-- Load files (images, video, data) by absolute path with your own code, or embed
-  them with `include_bytes!`. `studio look` and `studio hang` run the piece's
-  binary directly, so Bevy's asset server may not find a piece's `assets/`
-  folder. If a piece does use the asset server (shader models load WGSL that
-  way), run `studio look` early to confirm the capture sees it.
-- Extra crates (`nannou_audio`, `nannou_video`, `image`) go in the piece's own
-  `Cargo.toml`. `studio new --from` does not copy the parent's extra
-  dependencies yet; copy them by hand.
+- **Private materials stay private.** Materials are read at runtime by
+  absolute path from `/Users/jaredmcfarland/Developer/sketches-private/materials/`
+  and never copied under `pieces/`. `studio hang` commits everything in the
+  piece folder and pushes it publicly. Use `include_bytes!` or a piece
+  `assets/` folder only for files that can be public (WGSL, data you made). A
+  hung piece that reads private materials won't rebuild on another machine;
+  that is accepted.
+- Assets load relative to the piece folder (`pieces/<folder>/assets/`) in
+  `run`, `look` and `hang` alike. Run `studio look` early on any piece that
+  loads files.
+- Extra crates come from the workspace. Add the lines you need to the piece's
+  own `Cargo.toml` under `[dependencies]`:
+
+  ```toml
+  nannou_audio = { workspace = true }
+  nannou_video = { workspace = true }
+  image = { workspace = true, features = ["jpeg"] }
+  ```
+
+  The workspace `image` is PNG-only; add `"jpeg"` (or another format) in the
+  piece. `studio new --from` does not copy the parent's extra dependencies yet;
+  copy them by hand.
 - Nannou's examples for this version are in
   `/Users/jaredmcfarland/Developer/nannou-sketches/examples/`. Read the
   matching one before using a medium for the first time.
@@ -114,8 +137,8 @@ copy, commit or quote private material into it. A piece may read a file from
 - Nothing pushes except `scripts/studio hang`, and only after Jared says to
   hang the piece.
 - Commit only paths you changed, with an explicit pathspec.
-- Commit messages end with a blank line and the session's `Co-Authored-By`
-  line.
+- Every commit, in this repo and in the private one, ends with a blank line
+  and `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Writing
 

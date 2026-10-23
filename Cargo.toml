@@ -9,6 +9,8 @@ edition = "2024"
 piece-meta = { path = "lib/piece-meta" }
 kit = { path = "lib/kit" }
 nannou = { path = "../nannou-sketches/nannou" }
+nannou_audio = { path = "../nannou-sketches/nannou_audio" }
+nannou_video = { path = "../nannou-sketches/nannou_video" }
 bevy = { version = "0.19.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

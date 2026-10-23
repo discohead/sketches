@@ -18,7 +18,10 @@ the statement and the frame; you propose.
 
 ## 1. Frame it
 
-Stop the live run first (`pkill -f 'target/debug/(wip-|dss[0-9])'`).
+Stop the live run first, with the command in `CLAUDE.md`:
+`for p in $(pgrep -f 'target/debug/studio run '); do pkill -P "$p"; done`. It
+touches only `studio run` windows. Never stop pieces any broader way while a
+`look` or `hang` is running.
 
 Read `pieces/<folder>/piece.toml` and decide the `[time]` table with Jared:
 
@@ -90,8 +93,11 @@ whichever step he wants.
 scripts/studio hang <piece>
 ```
 
-It takes a minute or two (it renders every frame and encodes several videos),
-so give the command a 10-minute timeout. It refuses an unready piece and lists
+It renders every frame and encodes several videos. Capture costs about 5 s per
+second of piece, so an 8 s loop takes a minute or two. For pieces up to about
+20 s, run it in the foreground with a 10-minute timeout. For longer pieces, run
+it as a background command and wait for it to finish (a 60 s piece spends about
+300 s on capture alone). It refuses an unready piece and lists
 the reasons. Otherwise it:
 
 1. Assigns the next catalog number (DSS0001, …).
@@ -108,10 +114,13 @@ It resumes where it stopped. After the rename, use the catalog number:
 
 - **A readiness error** (empty title or statement, `audio` or `live` set,
   `still_at` past the end): fix `piece.toml` and re-run.
+- **No `origin` remote**: `hang` checks for it before rendering, because the
+  deposit's source link needs it, and `--no-push` does not get around it. Stop
+  and tell Jared. Creating the GitHub repo is a separate step (Task 8) that
+  needs his go-ahead; don't create it or add a remote yourself.
 - **"push failed"**: the commit exists locally. Show the error. If the cause
   is something Jared has to do (authentication, no network), tell him, and
-  re-run once it's fixed. If there is no `origin` remote, stop: creating the
-  GitHub repo needs Jared's go-ahead.
+  re-run once it's fixed.
 - **The deposit already exists**: never overwrite or delete a deposit. Tell
   Jared.
 - **A render or encode error**: read it, fix the piece if the piece is the
