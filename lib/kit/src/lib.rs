@@ -6,7 +6,7 @@
 //! }
 //!
 //! fn model(app: &App) -> Model {
-//!     kit::window(app).view(view).build();
+//!     kit::window!(app).view(view).build();
 //!     Model
 //! }
 //! ```
@@ -14,7 +14,6 @@
 use std::sync::OnceLock;
 
 use nannou::App;
-use nannou::prelude::Entity;
 
 pub use piece_meta::PieceMeta;
 
@@ -35,6 +34,22 @@ macro_rules! piece {
     };
 }
 
+/// Nannou's window builder for the piece's window: primary, not resizable, and
+/// `canvas.width × canvas.height` pixels. Chain `.view(view)`, event handlers, and `.build()`.
+///
+/// On native, [`launch`] forces the primary window's scale factor to 1.0, so on a Retina
+/// display the window is half as many points and every pixel matches the canvas.
+#[macro_export]
+macro_rules! window {
+    ($app:expr) => {{
+        let canvas = &$crate::meta().canvas;
+        $app.new_window()
+            .primary()
+            .size_pixels(canvas.width, canvas.height)
+            .resizable(false)
+    }};
+}
+
 /// Stores `meta` and runs the app.
 ///
 /// When `KIT_CAPTURE_DIR` and `KIT_CAPTURE_FRAMES` are set, time is frame-locked to
@@ -43,15 +58,39 @@ pub fn launch<M: 'static + Send + Sync>(meta: PieceMeta, builder: nannou::app::B
     assert!(META.set(meta).is_ok(), "kit::launch was called twice");
 
     #[cfg(not(target_arch = "wasm32"))]
-    let builder = match capture::CaptureConfig::from_env() {
-        Ok(Some(config)) => builder
-            .synchronous_pipeline_compilation(true)
-            .add_plugin(capture::CapturePlugin::new(config, self::meta().time.fps)),
-        Ok(None) => builder,
-        Err(e) => panic!("kit capture: {e:#}"),
+    let builder = {
+        let builder = builder.add_plugin(ExactPixelsPlugin);
+        match capture::CaptureConfig::from_env() {
+            Ok(Some(config)) => {
+                builder.add_plugin(capture::CapturePlugin::new(config, self::meta().time.fps))
+            }
+            Ok(None) => builder,
+            Err(e) => panic!("kit capture: {e:#}"),
+        }
     };
 
     builder.run();
+}
+
+/// Forces scale factor 1.0 on the primary window as it is spawned, before winit creates it,
+/// so physical pixels equal the canvas in live preview and capture alike.
+#[cfg(not(target_arch = "wasm32"))]
+struct ExactPixelsPlugin;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl bevy::app::Plugin for ExactPixelsPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        use bevy::ecs::prelude::*;
+        use bevy::window::{PrimaryWindow, Window};
+
+        app.add_observer(
+            |add: On<Add, PrimaryWindow>, mut windows: Query<&mut Window>| {
+                if let Ok(mut window) = windows.get_mut(add.entity) {
+                    window.resolution.set_scale_factor_override(Some(1.0));
+                }
+            },
+        );
+    }
 }
 
 /// The meta passed to [`launch`].
@@ -67,54 +106,6 @@ pub fn loop_phase(app: &App) -> f32 {
 /// `(t / seconds).rem_euclid(1.0)`.
 pub fn phase_at(t: f32, seconds: f32) -> f32 {
     (t / seconds).rem_euclid(1.0)
-}
-
-/// The piece's window: primary, not resizable, exactly `canvas.width × canvas.height` pixels.
-///
-/// On native the scale factor is forced to 1.0, so on a Retina display the window is
-/// half as many points and captures still match the canvas pixel for pixel.
-pub fn window<'a, 'w, 's, M: 'static>(app: &'a App<'w, 's>) -> WindowBuilder<'a, 'w, 's, M> {
-    WindowBuilder { app, view: None }
-}
-
-/// Returned by [`window`]. Nannou's own window builder lives in a private module, so its
-/// type cannot be named here; this wrapper forwards to it in [`WindowBuilder::build`].
-pub struct WindowBuilder<'a, 'w, 's, M> {
-    app: &'a App<'w, 's>,
-    view: Option<fn(&App<'_, '_>, &M)>,
-}
-
-impl<M: 'static> WindowBuilder<'_, '_, '_, M> {
-    /// The view function, as in nannou's `window::Builder::view`.
-    pub fn view(mut self, view: fn(&App<'_, '_>, &M)) -> Self {
-        self.view = Some(view);
-        self
-    }
-
-    /// Builds the window, returning its entity.
-    pub fn build(self) -> Entity {
-        let canvas = &meta().canvas;
-        let mut builder = self.app.new_window::<M>();
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut window = nannou::prelude::Window {
-                present_mode: nannou::prelude::PresentMode::Mailbox,
-                ..Default::default()
-            };
-            window.resolution.set_scale_factor_override(Some(1.0));
-            builder = builder.window(window);
-        }
-
-        builder = builder
-            .primary()
-            .size_pixels(canvas.width, canvas.height)
-            .resizable(false);
-        if let Some(view) = self.view {
-            builder = builder.view(view);
-        }
-        builder.build()
-    }
 }
 
 #[cfg(test)]

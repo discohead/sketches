@@ -7,6 +7,9 @@
 
 use nannou::prelude::*;
 
+// Uniform circular motion, not the plan's `x = 200 cos(TAU * phase)`: that disc stops at
+// phase 0, the loop seam, so d(59->0) would be about 8% of the mean step even with perfect
+// frame locking and the seam check could never pass.
 const ORBIT: f32 = 140.0;
 
 fn main() {
@@ -17,7 +20,7 @@ fn main() {
 struct Model;
 
 fn model(app: &App) -> Model {
-    kit::window(app).view(view).build();
+    kit::window!(app).view(view).build();
     Model
 }
 
