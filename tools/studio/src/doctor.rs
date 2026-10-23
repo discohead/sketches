@@ -22,6 +22,7 @@ pub fn parse_rustc_version(s: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Status {
     Ok(String),
     Fail(String),
@@ -102,22 +103,49 @@ fn check_private(ws: &Workspace) -> Status {
 }
 
 fn check_origin(ws: &Workspace) -> Status {
-    match run(Command::new("git").current_dir(&ws.root).args(["remote", "get-url", "origin"])) {
-        Ok(url) => Status::Ok(url),
+    let url = run(Command::new("git").current_dir(&ws.root).args(["remote", "get-url", "origin"]));
+    let allow_any = std::env::var("STUDIO_ALLOW_ANY_ORIGIN").is_ok_and(|v| v == "1");
+    origin_status(url, allow_any)
+}
+
+/// hang refuses an origin that isn't on GitHub, because the deposit links to the code there.
+fn origin_status(url: Result<String, String>, allow_any: bool) -> Status {
+    match url {
+        Ok(url) => match crate::deposit::source_repo(&url, allow_any) {
+            Ok(repo) => Status::Ok(repo),
+            Err(e) => Status::Fail(e.to_string()),
+        },
         Err(_) => Status::Warn("no origin remote yet".into()),
+    }
+}
+
+fn check_branch(ws: &Workspace) -> Status {
+    branch_status(run(Command::new("git").current_dir(&ws.root).args(["branch", "--show-current"])))
+}
+
+/// hang pushes only from `main`. Another branch is fine for work, so it is a warning.
+fn branch_status(branch: Result<String, String>) -> Status {
+    match branch {
+        Ok(b) if b == "main" => Status::Ok(b),
+        Ok(b) => {
+            let shown = if b.is_empty() { "a detached HEAD".to_string() } else { b };
+            Status::Warn(format!("on {shown}; hang pushes main only"))
+        }
+        Err(e) => Status::Fail(e),
     }
 }
 
 /// Print one line per check. Returns true if every check passed (warnings are fine).
 pub fn run_all(ws: &Workspace) -> bool {
-    let checks: [(&str, fn(&Workspace) -> Status); 7] = [
+    let checks: [(&str, fn(&Workspace) -> Status); 8] = [
         ("cargo >= 1.95 (rustup)", check_cargo),
         ("wasm32-unknown-unknown target", check_wasm_target),
         ("wasm-bindgen 0.2.125", check_wasm_bindgen),
         ("ffmpeg on PATH", check_ffmpeg),
         ("nannou worktree on branch sketches", check_worktree),
         ("private dir exists", check_private),
-        ("git origin remote", check_origin),
+        ("git origin remote on GitHub", check_origin),
+        ("git branch is main", check_branch),
     ];
     let mut all_ok = true;
     for (label, check) in checks {
@@ -136,6 +164,32 @@ pub fn run_all(ws: &Workspace) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn origin_must_be_github() {
+        let ok = origin_status(Ok("git@github.com:discohead/sketches.git".into()), false);
+        assert_eq!(ok, Status::Ok("https://github.com/discohead/sketches".into()));
+        assert!(matches!(origin_status(Err("no remote".into()), false), Status::Warn(_)));
+        let Status::Fail(e) = origin_status(Ok("https://gitlab.com/a/b".into()), false) else {
+            panic!("a non-GitHub origin should fail");
+        };
+        assert!(e.contains("not a GitHub repo"), "{e}");
+        assert!(matches!(origin_status(Ok("https://gitlab.com/a/b".into()), true), Status::Ok(_)));
+    }
+
+    #[test]
+    fn branch_should_be_main() {
+        assert_eq!(branch_status(Ok("main".into())), Status::Ok("main".into()));
+        assert_eq!(
+            branch_status(Ok("phase-1".into())),
+            Status::Warn("on phase-1; hang pushes main only".into())
+        );
+        assert_eq!(
+            branch_status(Ok(String::new())),
+            Status::Warn("on a detached HEAD; hang pushes main only".into())
+        );
+        assert!(matches!(branch_status(Err("x".into())), Status::Fail(_)));
+    }
 
     #[test]
     fn rustc_version() {
