@@ -1,3 +1,4 @@
 target/
 outbox/
 .studio/
+.DS_Store

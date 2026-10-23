@@ -83,7 +83,20 @@ Show Jared the final values in a short block.
 
 ## 5. Ask
 
-Ask: "Hang it?" His yes is the approval to commit and push the piece publicly.
+First show Jared exactly what will be published. `studio hang` commits every
+file in the piece folder and pushes it:
+
+```sh
+git status --porcelain --untracked-files=all -- pieces/<folder>
+```
+
+Show him the output. Flag anything that isn't source (`src/`), `piece.toml`,
+`Cargo.toml`, or an asset that can be public (WGSL, data you made): a photo, a
+recording, a file from `materials/`, a `.DS_Store`, anything large. Remove or
+move it before going on. A tracked piece with no changes prints nothing; list
+it with `git ls-files -- pieces/<folder>` instead.
+
+Then ask: "Hang it?" His yes is the approval to commit and push the piece publicly.
 Nothing else in the practice pushes. If he says no or not yet, go back to
 whichever step he wants.
 
